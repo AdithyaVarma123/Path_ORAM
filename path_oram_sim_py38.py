@@ -3,6 +3,8 @@
 """
 Path ORAM simulation (Python 3.8 compatible version).
 Implements read-path eviction Path ORAM per Assignment 2 (Secure Cloud Computing).
+Sample run command:
+python3 path_oram_sim_py38.py --N 65536 --Z 2 --L 16 --ops 5000000 --warmup 3000000 --out simulation1.txt
 """
 
 import argparse
@@ -12,11 +14,11 @@ import sys
 from collections import defaultdict
 from typing import Optional
 
-#converts (level,index) into an array index in the flat representation of tree
+# converts (level,index) into an array index in the flat representation of tree
 def node_index(level: int, idx: int) -> int:
     return (1 << level) - 1 + idx
 
-#returns a list of nodes from root to leaf_x (not the buckets of those nodes!)
+# returns a list of nodes from root to leaf_x (not the buckets of those nodes!)
 def path_nodes(L: int, leaf_x: int):
     nodes = []
     for l in range(0, L + 1):
@@ -24,7 +26,7 @@ def path_nodes(L: int, leaf_x: int):
         nodes.append((l, idx))
     return nodes
 
-#checks if 2 leaves have the same ancestor at requested level 'level'
+# checks if 2 leaves have the same ancestor at requested level 'level'
 def same_subtree_at_level(L: int, leaf_a: int, leaf_b: int, level: int) -> bool:
     if level == 0:
         return True
@@ -32,7 +34,7 @@ def same_subtree_at_level(L: int, leaf_a: int, leaf_b: int, level: int) -> bool:
 
 
 class PathORAM:
-    #initialize all required variables and the tree
+    # initialize all required variables and the tree
     def __init__(self, N: int, Z: int, L: int, seed: Optional[int] = None):
         assert N > 0
         assert Z > 0
@@ -44,16 +46,16 @@ class PathORAM:
         self.tree = [list() for _ in range(self.num_nodes)]
         if seed is not None:
             random.seed(seed)
-        self.leaf_space = 1 << L  #number of leaf nodes (< num_nodes)
-        self.position = [random.randrange(self.leaf_space) for _ in range(N)] #position of each block is also randomized
+        self.leaf_space = 1 << L  # number of leaf nodes (< num_nodes)
+        self.position = [random.randrange(self.leaf_space) for _ in range(N)] # position of each block is also randomized
         self.stash = {}
         self._initial_place_blocks()
 
-    #returns the bucket stored at level 'level' and index 'idx'
+    # returns the bucket stored at level 'level' and index 'idx'
     def _bucket(self, level: int, idx: int) -> list:
         return self.tree[node_index(level, idx)]
 
-    #initialization of blocks into random buckets but still adhering to position table
+    # initialization of blocks into random buckets but still adhering to position table
     def _initial_place_blocks(self):
         order = list(range(self.N))
         random.shuffle(order) # to sample blocks randomly to be placed (this is randomization on top of position randomization)
@@ -61,7 +63,7 @@ class PathORAM:
             leaf = self.position[a]
             placed = False
             for l in range(self.L, -1, -1):
-                idx = leaf >> (self.L - l) if l > 0 else 0 #this does the bitshift to move up from child node to parent node index
+                idx = leaf >> (self.L - l) if l > 0 else 0 # this does the bitshift to move up from child node to parent node index
                 bucket = self._bucket(l, idx)
                 if len(bucket) < self.Z:
                     bucket.append((a, a)) # here (a,a) corresponds to (block_ID, data) initial data is kept the same as block_id cuz we don't care about the data
@@ -70,24 +72,33 @@ class PathORAM:
             if not placed:
                 self.stash[a] = a
 
-
+    # perform operation 'op' on block with block_id 'a'
     def access(self, op: str, a: int, new_data=None):
         assert 0 <= a < self.N
         assert op in ("read", "write")
         x = self.position[a]
         self.position[a] = random.randrange(self.leaf_space)
 
+        # load all bucket blocks into stash
         for (l, idx) in path_nodes(self.L, x):
             bucket = self._bucket(l, idx)
             for (bid, bdata) in bucket:
                 self.stash[bid] = bdata
             bucket.clear()
 
-        old_data = self.stash.get(a, a)
+        old_data = (a, None)   # always return a tuple
+
+        if a in self.stash:
+            old_data = self.stash[a]
+
         if op == "write":
             self.stash[a] = new_data
 
-        for l in range(self.L, -1, -1):
+        # iterate through all nodes along the last extracted path 
+        # and fill the buckets on each level with blocks from stash 
+        # if that block's path and last extractedf path intersect 
+        # at that level
+        for l in range(self.L, -1, -1):    
             idx = x >> (self.L - l) if l > 0 else 0
             bucket = self._bucket(l, idx)
             if len(bucket) >= self.Z:
@@ -124,15 +135,19 @@ class PathORAM:
 
             if t >= warmup_ops:
                 recorded_stash_sizes.append(len(self.stash))
+            if t!=0 and t%100000 == 0:
+                print(f"[INFO] {t} accesses performed so far..") # to show progress
 
         max_stash = max(recorded_stash_sizes) if recorded_stash_sizes else 0
         tail_counts = {}
         s = len(recorded_stash_sizes)
-        hist = [0] * (max_stash + 1)
+        hist = [0] * (max_stash + 1)   # create a histogram(frequency chart) for different stash sizes
         for val in recorded_stash_sizes:
             hist[val] += 1
         suffix_ge = [0] * (max_stash + 2)
         running = 0
+
+        # count values from right to left so that you can add suffix_ge to the tail_counts
         for k in range(max_stash, -1, -1):
             running += hist[k]
             suffix_ge[k] = running
