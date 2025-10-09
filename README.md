@@ -8,7 +8,7 @@ Sample initialization of tree:
 ![My Logo](images/sample_tree_init.jpg)
 
 # Implementation summary:
-The simulation is implemented in the script path oram sim py38.py. 
+The simulation is implemented in the script path_oram_sim_py38.py. 
 The code builds a binary ORAM tree of height L, 
 then performs random read and write operations on N blocks.
 
